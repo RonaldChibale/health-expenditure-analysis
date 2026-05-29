@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 generate_slides.py  — v2
 Redesigned to match Analysis_Story.pdf visual quality.
@@ -305,7 +305,7 @@ def slide_setup(prs, df):
     _footer(s,
             "Source: World Bank, World Development Indicators "
             "(health expenditure & life expectancy, 2000–2023 averages). "
-            "Focus: among the world’s highest spenders.")
+            "Peer comparison restricted to the world’s highest-spending countries.")
 
 
 # ── Slide 3 — FACTOR 1: EDUCATION QUALITY ────────────────────────────────────
@@ -363,7 +363,7 @@ def slide_education(prs, df):
     _para(tf, [("Countries that ", C_DARK),
                ("out-educate", C_TEAL),
                (" the U.S. tend to ", C_DARK),
-               ("out-live", C_TEAL),
+               ("outlive", C_TEAL),
                (" it", C_DARK)],
           size=27, bold=True)
 
@@ -381,7 +381,7 @@ def slide_education(prs, df):
           size=13.5, bold=True)
 
     _txt(s,
-         "Skills predict the behaviours — diet,\nscreening, adherence — that compound\ninto longer lives. The high-education,\nhigh-longevity countries cluster toward\nthe upper right; the U.S. does not.",
+         "Skills predict the behaviors — diet,\nscreening, adherence — that compound\ninto longer lives. The high-education,\nhigh-longevity countries cluster toward\nthe upper right; the U.S. does not.",
          rx, Inches(3.3), rw, Inches(2.5), size=12, color=C_BODY)
 
     _footer(s,
@@ -531,7 +531,7 @@ def slide_demographics(prs, df):
     rx, rw = Inches(9.2), Inches(3.95)
 
     _txt(s,
-         "A common defence: “Americans die younger\nbecause the U.S. is different.”\nThe age structure says otherwise.",
+         "Some argue demographics explain the gap — that the U.S. is simply younger.\nThe age structure says otherwise.",
          rx, Inches(2.35), rw, Inches(1.1), size=12, color=C_BODY)
 
     tf3 = _mixed_box(s, rx, Inches(3.55), rw, Inches(1.9))
@@ -668,7 +668,7 @@ def slide_pattern(prs):
         ("Education — PISA 2022", "489",  C_DARK,  "533",     C_TEAL),
         ("Adult obesity",          "42.9%",   C_RED,   "4.9%",    C_DARK),
         ("Population aged 65+",    "17.9%",   C_DARK,  "29.8%",   C_DARK),
-        ("Medical price level",    "143",     C_RED,   "≈100", C_DARK),
+        ("Medical price level (OECD = 100)", "143", C_RED, "≈100", C_DARK),
     ]
     rh = Inches(0.66)
     for i, (metric, us_v, us_c, jp_v, jp_c) in enumerate(rows):
