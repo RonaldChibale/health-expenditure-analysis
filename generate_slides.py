@@ -1,30 +1,13 @@
 #!/usr/bin/env python3
 """
-generate_slides.py
-==================
-Generates health_expenditure_analysis.pptx
+generate_slides.py  — v2
+Redesigned to match Analysis_Story.pdf visual quality.
 
+8 slides  |  Storytelling with Data  |  Situation -> Complication -> Resolution
 Big Idea: America's longevity problem is not a budget problem — it is upstream of the budget.
-Structure: Storytelling with Data  (Situation → Complication → Resolution)
-Audience:  Data analysts / MBA class / executive board
-Source:    World Bank World Development Indicators, 2000-2023
-
-Slides
-------
- 1  Cover
- 2  Global scatter: spending vs life expectancy
- 3  Top 15 spenders bar chart
- 4  High-income peer scatter (US anomaly)
- 5  Three upstream factors (infographic)
- 6  Factor 1 – Obesity
- 7  Factor 2 – Education & health literacy
- 8  Factor 3 – System efficiency
- 9  Resolution comparison table
-10  Call to action
 """
 
-import os
-import io
+import os, io
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -37,98 +20,112 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 
-# ── Dimensions ────────────────────────────────────────────────────────────────
-SLIDE_W = Inches(13.333)
-SLIDE_H = Inches(7.5)
+# ── Slide dimensions ──────────────────────────────────────────────────────────
+W = Inches(13.333)
+H = Inches(7.5)
 
-# ── Palette (Power BI style) ──────────────────────────────────────────────────
-C_BLUE       = "#0078D4"
-C_DARKBLUE   = "#004578"
-C_ORANGE     = "#D87000"
-C_GREEN      = "#107C10"
-C_WHITE      = "#FFFFFF"
-C_NEARBLACK  = "#252525"
-C_GRAY       = "#737373"
-C_LIGHTGRAY  = "#F2F2F2"
-C_MIDGRAY    = "#D1D1D1"
-C_LIGHTBLUE  = "#90CAF9"
-C_BLUEGRAY   = "#B0BEC5"
+# ── Color palette (matches Analysis_Story.pdf) ────────────────────────────────
+C_NAVY    = "#1B2A45"   # dark slide background
+C_RED     = "#C0392B"   # United States / bad metric
+C_TEAL    = "#2BA88A"   # Japan / positive metric
+C_WHITE   = "#FFFFFF"
+C_DARK    = "#0F1F35"   # near-black headers on white slides
+C_BODY    = "#4B5563"   # body text on white slides
+C_SECTION = "#2BA88A"   # section label colour (= teal)
+C_SUB     = "#94A3B8"   # muted subtext on dark slides
+C_MUTED   = "#5D7A8F"   # "how much" in takeaway headline
+C_MIDGRAY = "#D1D5DB"
 
-# matplotlib named equivalents for places where hex is needed directly
-MPL_BLUE      = C_BLUE
-MPL_ORANGE    = C_ORANGE
-MPL_GREEN     = C_GREEN
-MPL_MIDGRAY   = C_MIDGRAY
-MPL_LIGHTGRAY = C_LIGHTGRAY
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _rgb(hex_str):
-    h = hex_str.lstrip("#")
-    return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+# Chart-specific palette
+CH_US    = "#C0392B"
+CH_JP    = "#2BA88A"
+CH_SP    = "#D4980A"   # Spain gold
+CH_GRAY  = "#AAAAAA"   # all-country dots
+CH_TREND = "#CCCCCC"   # dashed trend line
+CH_BAR   = "#D1D5DB"   # peer country bars
 
 
-def _blank_slide(prs):
-    """Add a blank (layout-6) slide."""
+# ── Core helpers ──────────────────────────────────────────────────────────────
+
+def _rgb(h):
+    h = h.lstrip("#")
+    return RGBColor(int(h[:2], 16), int(h[2:4], 16), int(h[4:], 16))
+
+
+def _blank(prs):
     return prs.slides.add_slide(prs.slide_layouts[6])
 
 
 def _bg(slide, color):
-    fill = slide.background.fill
-    fill.solid()
-    fill.fore_color.rgb = _rgb(color)
+    f = slide.background.fill
+    f.solid()
+    f.fore_color.rgb = _rgb(color)
 
 
-def _rect(slide, left, top, width, height, fill_color, line_color=None):
-    shape = slide.shapes.add_shape(1, left, top, width, height)
+def _rect(slide, l, t, w, h, fill, line=None):
+    shape = slide.shapes.add_shape(1, l, t, w, h)
     shape.fill.solid()
-    shape.fill.fore_color.rgb = _rgb(fill_color)
-    if line_color:
-        shape.line.color.rgb = _rgb(line_color)
+    shape.fill.fore_color.rgb = _rgb(fill)
+    if line:
+        shape.line.color.rgb = _rgb(line)
         shape.line.width = Pt(0.75)
     else:
         shape.line.fill.background()
     return shape
 
 
-def _txt(slide, text, left, top, width, height,
-         size=14, bold=False, italic=False,
-         color=C_NEARBLACK, align=PP_ALIGN.LEFT):
-    """Add a text box; newlines become separate paragraphs."""
-    box = slide.shapes.add_textbox(left, top, width, height)
+def _oval(slide, l, t, w, h, fill):
+    shape = slide.shapes.add_shape(9, l, t, w, h)
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = _rgb(fill)
+    shape.line.fill.background()
+    return shape
+
+
+def _txt(slide, text, l, t, w, h, size=12, bold=False, italic=False,
+         color=C_DARK, align=PP_ALIGN.LEFT):
+    box = slide.shapes.add_textbox(l, t, w, h)
     tf = box.text_frame
     tf.word_wrap = True
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        para.alignment = align
-        run = para.add_run()
-        run.text = line
-        run.font.size = Pt(size)
-        run.font.bold = bold
-        run.font.italic = italic
-        run.font.color.rgb = _rgb(color)
+    for i, line in enumerate(text.split("\n")):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = align
+        r = p.add_run()
+        r.text = line
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        r.font.italic = italic
+        r.font.color.rgb = _rgb(color)
     return box
 
 
-def _mpl_style(ax, xlabel=None, ylabel=None):
-    """Apply Power BI–inspired minimal style to a matplotlib Axes."""
-    ax.set_facecolor("white")
-    ax.figure.patch.set_facecolor("white")
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    ax.spines["left"].set_color(MPL_MIDGRAY)
-    ax.spines["bottom"].set_color(MPL_MIDGRAY)
-    ax.tick_params(colors=C_GRAY, labelsize=9)
-    if xlabel:
-        ax.set_xlabel(xlabel, fontsize=9, color=C_GRAY, labelpad=6)
-    if ylabel:
-        ax.set_ylabel(ylabel, fontsize=9, color=C_GRAY, labelpad=6)
-    ax.grid(axis="y", color=MPL_LIGHTGRAY, linewidth=0.8, zorder=0)
+def _mixed_box(slide, l, t, w, h):
+    """Return a text frame ready for mixed-colour paragraphs."""
+    box = slide.shapes.add_textbox(l, t, w, h)
+    box.text_frame.word_wrap = True
+    return box.text_frame
 
 
-def _to_stream(fig):
+def _para(tf, parts, size, bold=True, space_before=0, space_after=0, align=PP_ALIGN.LEFT):
+    """Append a paragraph with mixed-colour runs.  parts = [(text, color), ...]"""
+    if len(tf.paragraphs) == 1 and not tf.paragraphs[0].runs:
+        p = tf.paragraphs[0]
+    else:
+        p = tf.add_paragraph()
+    p.alignment = align
+    p.space_before = Pt(space_before)
+    p.space_after = Pt(space_after)
+    for text, color in parts:
+        if text:
+            r = p.add_run()
+            r.text = text
+            r.font.size = Pt(size)
+            r.font.bold = bold
+            r.font.color.rgb = _rgb(color)
+    return p
+
+
+def _to_img(fig):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
                 facecolor="white", edgecolor="none")
@@ -137,665 +134,653 @@ def _to_stream(fig):
     return buf
 
 
-def _add_pic(slide, stream, left, top, width, height):
-    slide.shapes.add_picture(stream, left, top, width, height)
+def _pic(slide, img, l, t, w, h):
+    slide.shapes.add_picture(img, l, t, w, h)
 
 
-# ── Slide 1 – Cover ───────────────────────────────────────────────────────────
-
-def slide_cover(prs):
-    slide = _blank_slide(prs)
-    _bg(slide, C_DARKBLUE)
-
-    # Left accent bar
-    _rect(slide, Inches(0), Inches(0), Inches(0.35), SLIDE_H, C_BLUE)
-
-    _txt(slide,
-         "America's Longevity Problem\nIs Not a Budget Problem",
-         Inches(0.7), Inches(1.4), Inches(11.5), Inches(2.4),
-         size=40, bold=True, color=C_WHITE)
-
-    _txt(slide,
-         "It is upstream of the budget.",
-         Inches(0.7), Inches(3.9), Inches(11.0), Inches(0.65),
-         size=22, color=C_LIGHTBLUE)
-
-    # Divider
-    _rect(slide, Inches(0.7), Inches(4.65), Inches(6.0), Inches(0.04), C_BLUE)
-
-    _txt(slide,
-         "A data-driven investigation into health expenditure, life expectancy, and\n"
-         "the upstream factors that explain America's $8,431-per-person paradox.\n\n"
-         "Source: World Bank World Development Indicators  |  2000 – 2023",
-         Inches(0.7), Inches(4.85), Inches(11.5), Inches(2.0),
-         size=13, color=C_BLUEGRAY)
-
-
-# ── Slide 2 – Global Scatter ──────────────────────────────────────────────────
-
-def _chart_global_scatter(df):
-    sub = df.dropna(subset=["health_expenditure_ppp", "life_expectancy"]).copy()
-    log_x = np.log10(sub["health_expenditure_ppp"])
-    le    = sub["life_expectancy"]
-
-    fig, ax = plt.subplots(figsize=(9.5, 5.2))
-
-    ax.scatter(log_x, le, color=MPL_BLUE, alpha=0.50, s=40, zorder=3)
-
-    # Trend line
-    coef = np.polyfit(log_x, le, 1)
-    xline = np.linspace(log_x.min(), log_x.max(), 300)
-    ax.plot(xline, np.poly1d(coef)(xline), color=C_NEARBLACK, lw=2.0, zorder=4)
-
-    # Correlation annotation
-    r = float(np.corrcoef(log_x, le)[0, 1])
-    ax.text(0.02, 0.97, f"r = {r:.2f}  (log scale)",
-            transform=ax.transAxes, fontsize=11, va="top",
-            fontweight="bold", color=C_NEARBLACK)
-
-    # Highlight US
-    us = sub[sub["country"] == "United States"]
-    if not us.empty:
-        ux = float(np.log10(us["health_expenditure_ppp"].iloc[0]))
-        uy = float(us["life_expectancy"].iloc[0])
-        ax.scatter([ux], [uy], color=MPL_ORANGE, s=110, zorder=5)
-        ax.annotate(
-            "United States\nHighest spend,\nbelow the trend",
-            xy=(ux, uy), xytext=(ux - 0.38, uy - 6.5),
-            fontsize=8.5, color=MPL_ORANGE, fontweight="bold",
-            arrowprops=dict(arrowstyle="->", color=MPL_ORANGE, lw=1.5)
-        )
-
-    # Highlight Japan and Spain
-    for country, dx, dy in [("Japan", 0.06, 2.5), ("Spain", -0.36, 2.5)]:
-        row = sub[sub["country"] == country]
-        if not row.empty:
-            rx = float(np.log10(row["health_expenditure_ppp"].iloc[0]))
-            ry = float(row["life_expectancy"].iloc[0])
-            ax.scatter([rx], [ry], color=MPL_GREEN, s=80, zorder=5)
-            ax.annotate(
-                f"{country}\nLess spend,\nlonger lives",
-                xy=(rx, ry), xytext=(rx + dx, ry + dy),
-                fontsize=8, color=MPL_GREEN, fontweight="bold",
-                arrowprops=dict(arrowstyle="->", color=MPL_GREEN, lw=1.2)
-            )
-
-    xticks = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
-    ax.set_xticks(xticks)
-    ax.set_xticklabels([f"${10**v:,.0f}" for v in xticks], fontsize=8.5)
-    ax.set_xlim(log_x.min() - 0.08, log_x.max() + 0.18)
-    ax.set_ylim(48, 90)
-    _mpl_style(ax,
-               xlabel="Health Expenditure per Capita, PPP (Log Scale)",
-               ylabel="Average Life Expectancy (Years)")
-    fig.tight_layout()
-    return fig
-
-
-def slide_global_scatter(prs, df):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "Across 140+ countries, spending more on health buys longer lives…",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=21, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "Pearson r = 0.70 on log scale — a strong global signal that investment matters",
-         Inches(0.4), Inches(0.68), Inches(12.5), Inches(0.32),
-         size=11, color=C_GRAY)
-    _add_pic(slide, _to_stream(_chart_global_scatter(df)),
-             Inches(0.3), Inches(1.05), Inches(12.7), Inches(6.1))
-    _txt(slide,
-         "Data: World Bank World Development Indicators. Health expenditure on log scale. PPP = Purchasing Power Parity.",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
-
-
-# ── Slide 3 – Top Spenders Bar Chart ─────────────────────────────────────────
-
-def _chart_top_spenders(df):
-    top = (df.nlargest(15, "health_expenditure_ppp")
-             .sort_values("health_expenditure_ppp", ascending=True)
-             .copy())
-
-    fig, ax = plt.subplots(figsize=(9.5, 5.5))
-    colors = [MPL_ORANGE if c == "United States" else MPL_BLUE
-              for c in top["country"]]
-    bars = ax.barh(top["country"], top["health_expenditure_ppp"],
-                   color=colors, height=0.65, zorder=3)
-
-    for bar, spend, le, cntry in zip(
-            bars, top["health_expenditure_ppp"],
-            top["life_expectancy"], top["country"]):
-        label_color = MPL_ORANGE if cntry == "United States" else C_NEARBLACK
-        bold_w = "bold" if cntry == "United States" else "normal"
-        ax.text(bar.get_width() + 80,
-                bar.get_y() + bar.get_height() / 2,
-                f"${spend:,.0f}  |  LE: {le:.0f} yrs",
-                va="center", fontsize=8.5,
-                color=label_color, fontweight=bold_w)
-
-    ax.set_xlim(0, 10800)
+def _mpl_clean(ax, xlabel=None, ylabel=None, x_grid=False):
     ax.set_facecolor("white")
     ax.figure.patch.set_facecolor("white")
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    ax.spines["left"].set_color(MPL_MIDGRAY)
-    ax.spines["bottom"].set_color(MPL_MIDGRAY)
-    ax.tick_params(colors=C_GRAY, labelsize=9)
-    ax.set_xlabel("Health Expenditure per Capita, PPP (USD)", fontsize=9, color=C_GRAY)
-    ax.grid(axis="x", color=MPL_LIGHTGRAY, linewidth=0.8, zorder=0)
-    fig.tight_layout()
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#E5E7EB")
+    ax.spines["bottom"].set_color("#E5E7EB")
+    ax.tick_params(colors="#9CA3AF", labelsize=9, length=2)
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=9, color="#9CA3AF", labelpad=6)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=9, color="#9CA3AF", labelpad=6)
+    if x_grid:
+        ax.grid(axis="x", color="#F3F4F6", linewidth=0.8, zorder=0)
+
+
+def _section(slide, text):
+    _txt(slide, text, Inches(0.45), Inches(0.27), Inches(9.0), Inches(0.32),
+         size=9, bold=True, color=C_SECTION)
+
+
+def _footer(slide, text):
+    _txt(slide, text, Inches(0.45), Inches(7.17), Inches(12.4), Inches(0.28),
+         size=7.5, italic=True, color="#9CA3AF")
+
+
+def _dot_legend(slide, x, label, color):
+    """Small filled square + label for chart legends."""
+    _rect(slide, x, Inches(1.82), Inches(0.2), Inches(0.2), color)
+    _txt(slide, label, x + Inches(0.28), Inches(1.79), Inches(1.8), Inches(0.3),
+         size=9.5, bold=True, color=color)
+
+
+# ── Slide 1 — Cover ───────────────────────────────────────────────────────────
+
+def slide_cover(prs):
+    s = _blank(prs)
+    _bg(s, C_NAVY)
+
+    _txt(s, "A DATA STORY  ·  HEALTH SPENDING vs. LONGEVITY",
+         Inches(0.45), Inches(0.38), Inches(12.0), Inches(0.32),
+         size=9, bold=True, color=C_SUB)
+
+    # ── Big mixed-colour headline ──
+    tf = _mixed_box(s, Inches(0.45), Inches(1.2), Inches(12.3), Inches(3.1))
+    _para(tf, [("America’s longevity problem ", C_WHITE),
+               ("isn’t a", C_RED)],
+          size=50, bold=True, space_after=0)
+    _para(tf, [("budget problem.", C_RED)],
+          size=50, bold=True, space_after=0)
+    _para(tf, [("It’s ", C_WHITE),
+               ("upstream", C_TEAL),
+               (" of the budget.", C_WHITE)],
+          size=50, bold=True)
+
+    # ── Body ──
+    _txt(s,
+         "Longer lives track education, lifestyle, demographics and how care is priced —\n"
+         "and on every one of these, the country that spends the most falls behind.\n"
+         "Here is what the highest spenders are doing differently.",
+         Inches(0.45), Inches(4.9), Inches(9.8), Inches(1.3),
+         size=13.5, color="#B8C8D8")
+
+    # ── Thin rule ──
+    _rect(s, Inches(0.45), Inches(6.42), Inches(5.5), Inches(0.025), "#2B4B75")
+
+    # ── Bottom tag ──
+    _oval(s, Inches(0.45), Inches(6.62), Inches(0.22), Inches(0.22), C_RED)
+    _txt(s, "United States", Inches(0.76), Inches(6.59), Inches(2.0), Inches(0.32),
+         size=11, bold=True, color=C_RED)
+    _txt(s, "vs. the world’s 14 highest-income health spenders",
+         Inches(2.85), Inches(6.59), Inches(8.5), Inches(0.32),
+         size=11, color=C_SUB)
+
+    _footer(s,
+            "Built on the attached Power BI analysis (World Bank WDI). "
+            "New factors: OECD · WHO · World Bank.")
+
+
+# ── Slide 2 — THE SETUP ───────────────────────────────────────────────────────
+
+def _chart_setup(df):
+    sub = df.dropna(subset=["health_expenditure_ppp", "life_expectancy"]).copy()
+    lx = np.log10(sub["health_expenditure_ppp"])
+    le = sub["life_expectancy"]
+
+    fig, ax = plt.subplots(figsize=(7.6, 5.0))
+
+    # All countries — light gray dots
+    ax.scatter(lx, le, color=CH_GRAY, alpha=0.30, s=18, zorder=2)
+
+    # Trend line — dashed gray
+    coef = np.polyfit(lx, le, 1)
+    xfit = np.linspace(lx.min(), lx.max(), 300)
+    ax.plot(xfit, np.poly1d(coef)(xfit), color=CH_TREND,
+            lw=1.6, linestyle="--", zorder=1)
+
+    def _highlight(country, color, s, label_txt, dx_pt, dy_pt):
+        row = sub[sub["country"] == country]
+        if row.empty:
+            return
+        cx = float(np.log10(row["health_expenditure_ppp"].iloc[0]))
+        cy = float(row["life_expectancy"].iloc[0])
+        ax.scatter([cx], [cy], color=color, s=s, zorder=5)
+        ax.annotate(label_txt, xy=(cx, cy),
+                    xytext=(dx_pt, dy_pt), textcoords="offset points",
+                    fontsize=8.5, color=color, fontweight="bold",
+                    arrowprops=dict(arrowstyle="->", color=color, lw=1.1))
+
+    _highlight("Spain", CH_SP, 80,
+               "Spain\n$3,050 · 82 yrs", -60, 18)
+    _highlight("Japan", CH_JP, 100,
+               "Japan\n$3,640 · 83 yrs", 8, 12)
+    _highlight("United States", CH_US, 110,
+               "United States\n$8,431 · 78 yrs", 6, -38)
+
+    ax.set_xticks([np.log10(100), np.log10(1000), np.log10(10000)])
+    ax.set_xticklabels(["$100", "$1,000", "$10,000"])
+    ax.set_xlim(1.65, 4.18)
+    ax.set_ylim(49, 88)
+    ax.text(0.015, 0.025,
+            "Each gray dot = one of 189 countries · 2000–2023 averages",
+            transform=ax.transAxes, fontsize=7.5, color="#AAAAAA", style="italic")
+    _mpl_clean(ax,
+               xlabel="Avg. health spending per person, PPP (log scale)",
+               ylabel="Avg. life expectancy (years)")
+    fig.tight_layout(pad=0.4)
     return fig
 
 
-def slide_top_spenders(prs, df):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "…but the world's biggest spenders tell a very different story",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=21, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "Japan reaches 84 years on $3,640 per person. The US spends $8,431 and reaches only 78.",
-         Inches(0.4), Inches(0.68), Inches(12.5), Inches(0.32),
-         size=11, color=C_GRAY)
-    _add_pic(slide, _to_stream(_chart_top_spenders(df)),
-             Inches(0.3), Inches(1.05), Inches(12.7), Inches(6.1))
-    _txt(slide,
-         "Data: World Bank World Development Indicators. LE = Life Expectancy.",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
+def slide_setup(prs, df):
+    s = _blank(prs)
+    _bg(s, C_WHITE)
+    _section(s, "THE SETUP")
+
+    tf = _mixed_box(s, Inches(0.45), Inches(0.58), Inches(12.3), Inches(1.05))
+    _para(tf, [("The biggest spender on Earth buys ", C_DARK),
+               ("one of the shortest lives", C_RED),
+               (" among rich nations", C_DARK)],
+          size=27, bold=True)
+
+    _pic(s, _to_img(_chart_setup(df)),
+         Inches(0.3), Inches(1.65), Inches(8.75), Inches(5.6))
+
+    rx, rw = Inches(9.2), Inches(3.95)
+
+    tf2 = _mixed_box(s, rx, Inches(1.9), rw, Inches(0.75))
+    _para(tf2, [("Spending buys longevity — until it doesn’t.", C_DARK)],
+          size=14, bold=True)
+
+    tf3 = _mixed_box(s, rx, Inches(2.75), rw, Inches(2.6))
+    _para(tf3,
+          [("Above roughly $4,000 per person the curve flattens. Yet the ", C_BODY),
+           ("U.S. spends ~$8,400", C_RED),
+           (" and still lands ", C_BODY),
+           ("5 years below Japan", C_TEAL),
+           (", which spends less than half as much.", C_BODY)],
+          size=12, bold=False)
+    _para(tf3, [("", C_BODY)], size=5, bold=False)
+    _para(tf3,
+          [("So the question isn’t how much to spend. "
+            "It’s what those dollars sit on top of.", C_DARK)],
+          size=12, bold=True)
+
+    _footer(s,
+            "Source: World Bank, World Development Indicators "
+            "(health expenditure & life expectancy, 2000–2023 averages). "
+            "Focus: among the world’s highest spenders.")
 
 
-# ── Slide 4 – US Anomaly (high-income peers) ─────────────────────────────────
-
-def _chart_hi_peers(df):
-    hi = df[df["health_expenditure_ppp"] >= 2000].dropna(
-        subset=["health_expenditure_ppp", "life_expectancy"]).copy()
-
-    fig, ax = plt.subplots(figsize=(9.5, 5.2))
-
-    non_us = hi[hi["country"] != "United States"]
-    ax.scatter(non_us["health_expenditure_ppp"], non_us["life_expectancy"],
-               color=MPL_BLUE, alpha=0.60, s=55, zorder=3)
-
-    label_set = {"Japan", "Spain", "Switzerland", "France",
-                 "Germany", "Canada", "Australia", "Italy", "South Korea", "United Kingdom"}
-    for _, row in non_us[non_us["country"].isin(label_set)].iterrows():
-        ax.annotate(row["country"],
-                    xy=(row["health_expenditure_ppp"], row["life_expectancy"]),
-                    xytext=(6, 1), textcoords="offset points",
-                    fontsize=7.5, color=MPL_BLUE)
-
-    us = hi[hi["country"] == "United States"]
-    ux = float(us["health_expenditure_ppp"].iloc[0])
-    uy = float(us["life_expectancy"].iloc[0])
-    ax.scatter([ux], [uy], color=MPL_ORANGE, s=150, zorder=5)
-    ax.annotate(
-        "United States\n$8,431 / 78.5 yrs",
-        xy=(ux, uy), xytext=(ux - 2500, uy - 2.8),
-        fontsize=9.5, color=MPL_ORANGE, fontweight="bold",
-        arrowprops=dict(arrowstyle="->", color=MPL_ORANGE, lw=1.6)
-    )
-
-    ax.xaxis.set_major_formatter(
-        mticker.FuncFormatter(lambda x, _: f"${x / 1000:.0f}K"))
-    ax.set_ylim(76, 87)
-    _mpl_style(ax,
-               xlabel="Health Expenditure per Capita, PPP",
-               ylabel="Life Expectancy (Years)")
-    fig.tight_layout()
-    return fig
-
-
-def slide_us_anomaly(prs, df):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "Among high-income peers, the United States is a clear outlier",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=21, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "Every comparable country achieves the same or better life expectancy at substantially lower cost",
-         Inches(0.4), Inches(0.68), Inches(12.5), Inches(0.32),
-         size=11, color=C_GRAY)
-
-    _add_pic(slide, _to_stream(_chart_hi_peers(df)),
-             Inches(0.3), Inches(1.05), Inches(9.0), Inches(6.15))
-
-    # Callout panel
-    _rect(slide, Inches(9.45), Inches(1.05), Inches(3.65), Inches(1.55), C_ORANGE)
-    _txt(slide,
-         "The US–Japan gap:\n5 fewer years of life\nat 2.3× the cost",
-         Inches(9.55), Inches(1.1), Inches(3.45), Inches(1.4),
-         size=13, bold=True, color=C_WHITE, align=PP_ALIGN.CENTER)
-
-    _rect(slide, Inches(9.45), Inches(2.75), Inches(3.65), Inches(4.45), C_LIGHTGRAY)
-    insight = ("The US outspends Japan by\n$4,791 per person per year.\n\n"
-               "Multiplied across 330 million\nAmericans, that is ~$1.6 trillion\n"
-               "in annual excess health spend\nwith worse outcomes to show for it.\n\n"
-               "The problem is systemic,\nnot financial.")
-    _txt(slide, insight,
-         Inches(9.6), Inches(2.9), Inches(3.35), Inches(4.1),
-         size=10.5, color=C_NEARBLACK)
-
-    _txt(slide,
-         "Data: World Bank World Development Indicators.",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
-
-
-# ── Slide 5 – Three Upstream Factors ─────────────────────────────────────────
-
-def slide_upstream_factors(prs):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "If it's not money, then what drives the gap?",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=22, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "Three upstream factors explain most of the difference in health outcomes among wealthy nations",
-         Inches(0.4), Inches(0.7), Inches(12.5), Inches(0.38),
-         size=11, color=C_GRAY)
-
-    factors = [
-        ("01", "Lifestyle &\nObesity",
-         "The US adult obesity rate (36%) is\nnearly 3× Japan's (4%) and France's\n(22%). Obesity is the single largest\ndriver of preventable chronic disease.",
-         C_ORANGE),
-        ("02", "Education &\nHealth Literacy",
-         "Countries with strong public health\neducation programs see 15–25%\nlower preventable mortality and\nhigher system efficiency per dollar.",
-         C_BLUE),
-        ("03", "System Design &\nPrimary Care",
-         "Universal primary care access\nreduces costly hospital admissions\nand concentrates spend where it\nhas the highest marginal return.",
-         C_GREEN),
-    ]
-
-    box_w = Inches(3.95)
-    box_h = Inches(5.1)
-    for i, (num, title, body, color) in enumerate(factors):
-        lft = Inches(0.35 + i * 4.35)
-        _rect(slide, lft, Inches(1.3), box_w, box_h, color)
-        _txt(slide, num,
-             lft + Inches(0.18), Inches(1.45), box_w - Inches(0.3), Inches(0.65),
-             size=30, bold=True, color=C_WHITE)
-        _txt(slide, title,
-             lft + Inches(0.18), Inches(2.1), box_w - Inches(0.3), Inches(0.85),
-             size=17, bold=True, color=C_WHITE)
-        _txt(slide, body,
-             lft + Inches(0.18), Inches(3.0), box_w - Inches(0.3), Inches(3.2),
-             size=11.5, color=C_WHITE)
-
-    _txt(slide,
-         "Source: WHO Global Health Observatory, OECD Health at a Glance 2023, World Bank WDI",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
-
-
-# ── Slide 6 – Factor 1: Obesity ───────────────────────────────────────────────
-
-def _chart_obesity(df):
-    hi = df[df["health_expenditure_ppp"] >= 2000].dropna(
-        subset=["obesity_rate", "life_expectancy"]).copy()
-
-    fig, ax = plt.subplots(figsize=(8.5, 4.8))
-
-    non_us = hi[hi["country"] != "United States"]
-    ax.scatter(non_us["obesity_rate"], non_us["life_expectancy"],
-               color=MPL_BLUE, alpha=0.60, s=55, zorder=3)
-
-    for _, row in non_us[non_us["country"].isin(
-            {"Japan", "Spain", "France", "Germany",
-             "Canada", "Australia", "United Kingdom", "Italy", "Switzerland"})].iterrows():
-        ax.annotate(row["country"],
-                    xy=(row["obesity_rate"], row["life_expectancy"]),
-                    xytext=(4, 0), textcoords="offset points",
-                    fontsize=7.5, color=MPL_BLUE)
-
-    us = hi[hi["country"] == "United States"]
-    ux = float(us["obesity_rate"].iloc[0])
-    uy = float(us["life_expectancy"].iloc[0])
-    ax.scatter([ux], [uy], color=MPL_ORANGE, s=140, zorder=5)
-    ax.annotate(
-        "United States\n36.2% obese",
-        xy=(ux, uy), xytext=(ux - 14, uy + 1.5),
-        fontsize=9, color=MPL_ORANGE, fontweight="bold",
-        arrowprops=dict(arrowstyle="->", color=MPL_ORANGE, lw=1.5)
-    )
-
-    # Trend (exclude US to show clean non-US trend)
-    z = np.polyfit(non_us["obesity_rate"], non_us["life_expectancy"], 1)
-    xfit = np.linspace(hi["obesity_rate"].min(), hi["obesity_rate"].max(), 200)
-    ax.plot(xfit, np.poly1d(z)(xfit), color=MPL_MIDGRAY,
-            lw=1.6, linestyle="--", zorder=2)
-
-    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.0f}%"))
-    ax.set_ylim(76, 87)
-    _mpl_style(ax,
-               xlabel="Adult Obesity Rate",
-               ylabel="Life Expectancy (Years)")
-    fig.tight_layout()
-    return fig
-
-
-def slide_obesity(prs, df):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "Factor 1: America is the most obese wealthy nation — and it shows",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=21, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "Higher obesity rates correlate strongly with lower life expectancy, even among the world's richest countries",
-         Inches(0.4), Inches(0.68), Inches(12.5), Inches(0.32),
-         size=11, color=C_GRAY)
-
-    _add_pic(slide, _to_stream(_chart_obesity(df)),
-             Inches(0.3), Inches(1.05), Inches(8.8), Inches(5.9))
-
-    _rect(slide, Inches(9.25), Inches(1.05), Inches(3.85), Inches(5.9), C_LIGHTGRAY)
-    stats = [
-        ("36.2%", "US adult obesity rate"),
-        ("3.4×", "higher than Japan (10.7%)"),
-        ("$1,861", "annual per-person\ncost of obesity in the US"),
-        ("#1 of 38", "OECD ranking for\nobesity prevalence"),
-    ]
-    for i, (val, label) in enumerate(stats):
-        _txt(slide, val,
-             Inches(9.4), Inches(1.25 + i * 1.35), Inches(3.5), Inches(0.55),
-             size=26, bold=True, color=C_ORANGE)
-        _txt(slide, label,
-             Inches(9.4), Inches(1.82 + i * 1.35), Inches(3.5), Inches(0.5),
-             size=10, color=C_GRAY)
-
-    _txt(slide,
-         "Data: WHO Global Health Observatory, OECD Health Statistics.",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
-
-
-# ── Slide 7 – Factor 2: Education ────────────────────────────────────────────
+# ── Slide 3 — FACTOR 1: EDUCATION QUALITY ────────────────────────────────────
 
 def _chart_education(df):
-    hi = df[df["health_expenditure_ppp"] >= 1500].dropna(
-        subset=["mean_years_schooling", "life_expectancy"]).copy()
+    hi = df[df["health_expenditure_ppp"] >= 4000].dropna(
+        subset=["pisa_2022_score", "life_expectancy"]).copy()
 
-    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    fig, ax = plt.subplots(figsize=(7.6, 5.0))
 
-    non_us = hi[hi["country"] != "United States"]
-    ax.scatter(non_us["mean_years_schooling"], non_us["life_expectancy"],
-               color=MPL_BLUE, alpha=0.60, s=55, zorder=3)
+    other = hi[~hi["country"].isin(["United States", "Japan"])]
+    ax.scatter(other["pisa_2022_score"], other["life_expectancy"],
+               color=CH_GRAY, alpha=0.55, s=55, zorder=2)
 
-    for _, row in non_us[non_us["country"].isin(
-            {"Japan", "Spain", "Germany", "South Korea",
-             "Canada", "Australia", "France", "Finland"})].iterrows():
+    for _, row in other.iterrows():
         ax.annotate(row["country"],
-                    xy=(row["mean_years_schooling"], row["life_expectancy"]),
-                    xytext=(4, 1), textcoords="offset points",
-                    fontsize=7.5, color=MPL_BLUE)
+                    xy=(row["pisa_2022_score"], row["life_expectancy"]),
+                    xytext=(4, 0), textcoords="offset points",
+                    fontsize=7.5, color="#888888")
 
     us = hi[hi["country"] == "United States"]
-    ux = float(us["mean_years_schooling"].iloc[0])
-    uy = float(us["life_expectancy"].iloc[0])
-    ax.scatter([ux], [uy], color=MPL_ORANGE, s=140, zorder=5)
-    ax.annotate(
-        "United States\n13.4 yrs / 78.5 yrs LE",
-        xy=(ux, uy), xytext=(ux - 3.2, uy - 1.5),
-        fontsize=9, color=MPL_ORANGE, fontweight="bold",
-        arrowprops=dict(arrowstyle="->", color=MPL_ORANGE, lw=1.5)
-    )
+    if not us.empty:
+        ux = float(us["pisa_2022_score"].iloc[0])
+        uy = float(us["life_expectancy"].iloc[0])
+        ax.axvline(x=ux, color=CH_US, lw=0.9, linestyle="--", alpha=0.45, zorder=1)
+        ax.scatter([ux], [uy], color=CH_US, s=120, zorder=5)
+        ax.annotate("United States", xy=(ux, uy),
+                    xytext=(5, -14), textcoords="offset points",
+                    fontsize=9, color=CH_US, fontweight="bold")
 
-    z = np.polyfit(non_us["mean_years_schooling"], non_us["life_expectancy"], 1)
-    xfit = np.linspace(hi["mean_years_schooling"].min(),
-                       hi["mean_years_schooling"].max(), 200)
-    ax.plot(xfit, np.poly1d(z)(xfit), color=MPL_MIDGRAY,
-            lw=1.6, linestyle="--", zorder=2)
+    jp = hi[hi["country"] == "Japan"]
+    if not jp.empty:
+        jx = float(jp["pisa_2022_score"].iloc[0])
+        jy = float(jp["life_expectancy"].iloc[0])
+        ax.scatter([jx], [jy], color=CH_JP, s=120, zorder=5)
+        ax.annotate("Japan", xy=(jx, jy),
+                    xytext=(6, 2), textcoords="offset points",
+                    fontsize=9, color=CH_JP, fontweight="bold")
 
-    _mpl_style(ax,
-               xlabel="Mean Years of Schooling",
-               ylabel="Life Expectancy (Years)")
-    fig.tight_layout()
+    ax.set_xlim(461, 542)
+    ax.set_ylim(77.0, 84.5)
+    _mpl_clean(ax,
+               xlabel="Education quality — PISA 2022 mean score (math · reading · science)",
+               ylabel="Avg. life expectancy (years)")
+    fig.tight_layout(pad=0.4)
     return fig
 
 
 def slide_education(prs, df):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "Factor 2: Education shapes health behaviour — and outcomes",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=21, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "Countries where populations have more schooling show better preventive care uptake and lower chronic disease burden",
-         Inches(0.4), Inches(0.68), Inches(12.5), Inches(0.32),
-         size=11, color=C_GRAY)
+    s = _blank(prs)
+    _bg(s, C_WHITE)
+    _section(s, "FACTOR 1 — EDUCATION QUALITY")
 
-    _add_pic(slide, _to_stream(_chart_education(df)),
-             Inches(0.3), Inches(1.05), Inches(8.8), Inches(5.9))
+    tf = _mixed_box(s, Inches(0.45), Inches(0.58), Inches(12.3), Inches(1.05))
+    _para(tf, [("Countries that ", C_DARK),
+               ("out-educate", C_TEAL),
+               (" the U.S. tend to ", C_DARK),
+               ("out-live", C_TEAL),
+               (" it", C_DARK)],
+          size=27, bold=True)
 
-    _rect(slide, Inches(9.25), Inches(1.05), Inches(3.85), Inches(5.9), C_LIGHTGRAY)
-    insight = (
-        "Health literacy — the ability to\nunderstand and act on health\n"
-        "information — varies significantly\nacross OECD nations.\n\n"
-        "Countries investing in public\nhealth education achieve\n15–25% lower preventable\n"
-        "mortality rates (OECD, 2023).\n\n"
-        "Japan's school health programme\nreaches children from age 6,\n"
-        "embedding nutrition norms\ndecades before disease risk."
-    )
-    _txt(slide, insight,
-         Inches(9.4), Inches(1.25), Inches(3.55), Inches(5.5),
-         size=10.5, color=C_NEARBLACK)
+    _pic(s, _to_img(_chart_education(df)),
+         Inches(0.3), Inches(1.65), Inches(8.75), Inches(5.6))
 
-    _txt(slide,
-         "Data: UNDP Human Development Index, WHO Global Health Observatory.",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
+    _dot_legend(s, Inches(9.2), "United States", CH_US)
+    _dot_legend(s, Inches(11.15), "Japan", CH_JP)
+
+    rx, rw = Inches(9.2), Inches(3.95)
+
+    tf2 = _mixed_box(s, rx, Inches(2.3), rw, Inches(0.85))
+    _para(tf2, [("Japan tops the peer group at 533;\n"
+                 "the U.S. sits mid-pack at 489.", C_TEAL)],
+          size=13.5, bold=True)
+
+    _txt(s,
+         "Skills predict the behaviours — diet,\nscreening, adherence — that compound\ninto longer lives. The high-education,\nhigh-longevity countries cluster toward\nthe upper right; the U.S. does not.",
+         rx, Inches(3.3), rw, Inches(2.5), size=12, color=C_BODY)
+
+    _footer(s,
+            "Source: OECD PISA 2022 (mean of mathematics, reading & science). "
+            "Life expectancy: World Bank WDI, 2000–2023 avg.")
 
 
-# ── Slide 8 – Factor 3: Efficiency ───────────────────────────────────────────
+# ── Slide 4 — FACTOR 2: LIFESTYLE ────────────────────────────────────────────
 
-def _chart_efficiency(df):
-    peers = ["Japan", "Spain", "Italy", "France", "Australia",
-             "South Korea", "United Kingdom", "Germany", "Canada", "United States"]
-    hi = df[df["country"].isin(peers)].dropna(
-        subset=["health_expenditure_ppp", "life_expectancy"]).copy()
-    hi["efficiency"] = hi["life_expectancy"] / (hi["health_expenditure_ppp"] / 1000)
-    hi = hi.sort_values("efficiency", ascending=True)
+def _chart_lifestyle(df):
+    order = ["United States", "Ireland", "Canada", "Germany", "Belgium",
+             "Luxembourg", "Norway", "Spain", "Austria", "Netherlands",
+             "Sweden", "Denmark", "Switzerland", "France", "Japan"]
+    sub = (df[df["country"].isin(order)]
+             .dropna(subset=["obesity_rate"])
+             .set_index("country")
+             .reindex(order)
+             .reset_index())
+    sub = sub.sort_values("obesity_rate", ascending=True)   # ascending for barh
 
-    fig, ax = plt.subplots(figsize=(9.5, 5.5))
-    colors = [MPL_ORANGE if c == "United States" else MPL_BLUE
-              for c in hi["country"]]
-    bars = ax.barh(hi["country"], hi["efficiency"], color=colors, height=0.65, zorder=3)
+    colors = [CH_US if c == "United States" else
+              (CH_JP if c == "Japan" else CH_BAR)
+              for c in sub["country"]]
 
-    for bar, val, cntry in zip(bars, hi["efficiency"], hi["country"]):
-        ax.text(bar.get_width() + 0.12,
+    fig, ax = plt.subplots(figsize=(7.6, 5.2))
+    bars = ax.barh(sub["country"], sub["obesity_rate"],
+                   color=colors, height=0.68, zorder=3)
+
+    for bar, val, cntry in zip(bars, sub["obesity_rate"], sub["country"]):
+        fc = CH_US if cntry == "United States" else (CH_JP if cntry == "Japan" else "#6B7280")
+        bw = "bold" if cntry in ("United States", "Japan") else "normal"
+        ax.text(bar.get_width() + 0.4,
                 bar.get_y() + bar.get_height() / 2,
-                f"{val:.1f} yrs / $1K",
-                va="center", fontsize=8.5,
-                color=MPL_ORANGE if cntry == "United States" else C_NEARBLACK,
-                fontweight="bold" if cntry == "United States" else "normal")
+                f"{val:.1f}%", va="center", fontsize=8.5,
+                color=fc, fontweight=bw)
 
-    ax.set_xlim(0, 34)
+    ax.set_xlim(0, 53)
+    ax.xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"{x:.0f}%"))
     ax.set_facecolor("white")
     ax.figure.patch.set_facecolor("white")
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    ax.spines["left"].set_color(MPL_MIDGRAY)
-    ax.spines["bottom"].set_color(MPL_MIDGRAY)
-    ax.tick_params(colors=C_GRAY, labelsize=9)
-    ax.set_xlabel("Life Expectancy Years per $1,000 of Health Spend", fontsize=9, color=C_GRAY)
-    ax.grid(axis="x", color=MPL_LIGHTGRAY, linewidth=0.8, zorder=0)
-    fig.tight_layout()
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_color("#E5E7EB")
+    ax.tick_params(colors="#9CA3AF", labelsize=9, length=0)
+    ax.set_xlabel("Adults with obesity, BMI ≥ 30 (%)", fontsize=9, color="#9CA3AF")
+    ax.grid(axis="x", color="#F3F4F6", linewidth=0.8, zorder=0)
+    fig.tight_layout(pad=0.4)
     return fig
 
 
-def slide_efficiency(prs, df):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "Factor 3: The US gets the fewest life-years per dollar of any peer nation",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=21, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "Life expectancy years per $1,000 spent — a simple metric of what each country buys with its health investment",
-         Inches(0.4), Inches(0.68), Inches(12.5), Inches(0.32),
-         size=11, color=C_GRAY)
+def slide_lifestyle(prs, df):
+    s = _blank(prs)
+    _bg(s, C_WHITE)
+    _section(s, "FACTOR 2 — LIFESTYLE")
 
-    _add_pic(slide, _to_stream(_chart_efficiency(df)),
-             Inches(0.3), Inches(1.05), Inches(12.7), Inches(6.15))
+    tf = _mixed_box(s, Inches(0.45), Inches(0.58), Inches(12.3), Inches(1.05))
+    _para(tf, [("The gap is written in waistlines: ", C_DARK),
+               ("43% obese vs. 5%", C_RED)],
+          size=27, bold=True)
 
-    _txt(slide,
-         "Data: World Bank World Development Indicators. Efficiency = Life Expectancy ÷ (Health Expenditure per capita / 1,000).",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
+    _pic(s, _to_img(_chart_lifestyle(df)),
+         Inches(0.3), Inches(1.6), Inches(8.75), Inches(5.65))
+
+    rx, rw = Inches(9.2), Inches(3.95)
+
+    tf2 = _mixed_box(s, rx, Inches(2.0), rw, Inches(0.95))
+    _para(tf2, [("Nearly 1 in 2 American adults", C_RED),
+                (" has obesity —\n", C_DARK),
+                ("almost 9× Japan’s rate.", C_TEAL)],
+          size=13.5, bold=True)
+
+    _txt(s,
+         "Obesity drives diabetes, heart disease\nand several cancers — the conditions\nthat pull life expectancy down. No amount\nof treatment spending offsets a\npopulation-wide risk this large.",
+         rx, Inches(3.2), rw, Inches(2.2), size=12, color=C_BODY)
+
+    _txt(s,
+         "This single factor does more to explain\nthe U.S. shortfall than the health budget does.",
+         rx, Inches(5.5), rw, Inches(0.9), size=12, bold=True, color=C_DARK)
+
+    _footer(s,
+            "Source: WHO Global Health Observatory — "
+            "prevalence of obesity among adults, BMI ≥ 30 (%), 2022.")
 
 
-# ── Slide 9 – Resolution: Comparison Table ───────────────────────────────────
+# ── Slide 5 — FACTOR 3: DEMOGRAPHICS ─────────────────────────────────────────
 
-def slide_comparison_table(prs):
-    slide = _blank_slide(prs)
-    _bg(slide, C_WHITE)
-    _txt(slide,
-         "High-performing systems share three upstream investments",
-         Inches(0.4), Inches(0.12), Inches(12.5), Inches(0.55),
-         size=21, bold=True, color=C_NEARBLACK)
-    _txt(slide,
-         "The common thread among Japan, Spain, Italy, and France is not their hospital budgets — it's what happens before the hospital",
-         Inches(0.4), Inches(0.68), Inches(12.5), Inches(0.35),
-         size=11, color=C_GRAY)
+def _chart_demographics(df):
+    peers = ["United States", "Japan", "France", "Spain", "Sweden",
+             "Germany", "Canada", "Austria", "Belgium", "Netherlands",
+             "Switzerland", "Denmark", "Norway", "Luxembourg", "Ireland"]
+    sub = df[df["country"].isin(peers)].dropna(
+        subset=["pop_65_plus_pct", "life_expectancy", "population_millions"]).copy()
 
-    headers  = ["Metric", "United States", "Japan / Spain", "Gap"]
-    col_w    = [Inches(3.9), Inches(2.0), Inches(2.8), Inches(3.0)]
-    col_left = [Inches(0.4), Inches(4.4), Inches(6.5), Inches(9.4)]
-    row_h    = Inches(0.60)
-    top0     = Inches(1.22)
+    fig, ax = plt.subplots(figsize=(7.6, 5.0))
 
-    # Header row
-    for hdr, cw, cl in zip(headers, col_w, col_left):
-        _rect(slide, cl, top0, cw, row_h, C_DARKBLUE)
-        _txt(slide, hdr, cl + Inches(0.06), top0 + Inches(0.1),
-             cw - Inches(0.1), row_h - Inches(0.12),
-             size=11, bold=True, color=C_WHITE)
+    for _, row in sub[~sub["country"].isin(["United States", "Japan"])].iterrows():
+        bsz = (row["population_millions"] ** 0.5) * 22
+        ax.scatter([row["pop_65_plus_pct"]], [row["life_expectancy"]],
+                   color=CH_GRAY, alpha=0.40, s=bsz, zorder=2)
+        ax.annotate(row["country"],
+                    xy=(row["pop_65_plus_pct"], row["life_expectancy"]),
+                    xytext=(4, 0), textcoords="offset points",
+                    fontsize=7.5, color="#888888")
+
+    for country, color in [("United States", CH_US), ("Japan", CH_JP)]:
+        r = sub[sub["country"] == country]
+        if r.empty:
+            continue
+        bsz = (float(r["population_millions"].iloc[0]) ** 0.5) * 22
+        ax.scatter([float(r["pop_65_plus_pct"].iloc[0])],
+                   [float(r["life_expectancy"].iloc[0])],
+                   color=color, s=bsz, zorder=5, alpha=0.85)
+        dy = -15 if country == "United States" else 5
+        ax.annotate(country,
+                    xy=(float(r["pop_65_plus_pct"].iloc[0]),
+                        float(r["life_expectancy"].iloc[0])),
+                    xytext=(5, dy), textcoords="offset points",
+                    fontsize=9, color=color, fontweight="bold")
+
+    ax.set_xlim(13, 32)
+    ax.set_ylim(77.5, 85.0)
+    _mpl_clean(ax,
+               xlabel="Share of population aged 65+ (%, 2024)  —  bubble size = population",
+               ylabel="Avg. life expectancy (years)")
+    fig.tight_layout(pad=0.4)
+    return fig
+
+
+def slide_demographics(prs, df):
+    s = _blank(prs)
+    _bg(s, C_WHITE)
+    _section(s, "FACTOR 3 — POPULATION & DEMOGRAPHICS")
+
+    tf = _mixed_box(s, Inches(0.45), Inches(0.58), Inches(12.3), Inches(1.05))
+    _para(tf, [("Ageing isn’t the excuse — ", C_DARK),
+               ("Japan is the oldest, and lives the longest", C_TEAL)],
+          size=27, bold=True)
+
+    _pic(s, _to_img(_chart_demographics(df)),
+         Inches(0.3), Inches(1.65), Inches(8.75), Inches(5.6))
+
+    _dot_legend(s, Inches(9.2), "United States", CH_US)
+    _dot_legend(s, Inches(11.15), "Japan", CH_JP)
+
+    rx, rw = Inches(9.2), Inches(3.95)
+
+    _txt(s,
+         "A common defence: “Americans die younger\nbecause the U.S. is different.”\nThe age structure says otherwise.",
+         rx, Inches(2.35), rw, Inches(1.1), size=12, color=C_BODY)
+
+    tf3 = _mixed_box(s, rx, Inches(3.55), rw, Inches(1.9))
+    _para(tf3,
+          [("The U.S. is the ", C_BODY),
+           ("youngest", C_RED),
+           (" of these peers\n(18% over 65) yet sits ", C_BODY),
+           ("lowest", C_RED),
+           (". Japan is the\n", C_BODY),
+           ("oldest", C_TEAL),
+           (" (30%) and ", C_BODY),
+           ("highest", C_TEAL), (".", C_BODY)],
+          size=12, bold=False)
+
+    _txt(s,
+         "A younger population should make\nlongevity easier, not harder.",
+         rx, Inches(5.55), rw, Inches(0.8), size=12, bold=True, color=C_DARK)
+
+    _footer(s,
+            "Source: UN World Population Prospects / World Bank — "
+            "population aged 65+ (% of total), 2024; population, 2023. "
+            "Life expectancy: World Bank WDI.")
+
+
+# ── Slide 6 — FACTOR 4: HEALTHCARE COSTS ─────────────────────────────────────
+
+COSTS_2022 = {
+    "United States": 12586, "Switzerland": 10575, "Norway": 9797,
+    "Germany": 8470, "Ireland": 8288, "Luxembourg": 8203,
+    "Austria": 7996, "Netherlands": 7788, "Belgium": 7359,
+    "Denmark": 7333, "Sweden": 7229, "Canada": 7066,
+    "France": 6643, "Japan": 5846, "Spain": 4916,
+}
+
+
+def _chart_costs():
+    countries = list(COSTS_2022.keys())[::-1]   # ascending for barh
+    values = [COSTS_2022[c] for c in countries]
+    colors = [CH_US if c == "United States" else
+              (CH_JP if c == "Japan" else CH_BAR) for c in countries]
+
+    fig, ax = plt.subplots(figsize=(7.6, 5.2))
+    bars = ax.barh(countries, values, color=colors, height=0.68, zorder=3)
+
+    for bar, val, cntry in zip(bars, values, countries):
+        fc = CH_US if cntry == "United States" else (CH_JP if cntry == "Japan" else "#6B7280")
+        bw = "bold" if cntry in ("United States", "Japan") else "normal"
+        ax.text(bar.get_width() + 80,
+                bar.get_y() + bar.get_height() / 2,
+                f"${val:,.0f}", va="center", fontsize=8.5,
+                color=fc, fontweight=bw)
+
+    ax.set_xlim(0, 16500)
+    ax.xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"${x/1000:.0f}K" if x > 0 else "$0"))
+    ax.set_facecolor("white")
+    ax.figure.patch.set_facecolor("white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_color("#E5E7EB")
+    ax.tick_params(colors="#9CA3AF", labelsize=9, length=0)
+    ax.set_xlabel("Health spending per person, PPP (current international $, 2022)",
+                  fontsize=9, color="#9CA3AF")
+    ax.grid(axis="x", color="#F3F4F6", linewidth=0.8, zorder=0)
+    fig.tight_layout(pad=0.4)
+    return fig
+
+
+def slide_costs(prs):
+    s = _blank(prs)
+    _bg(s, C_WHITE)
+    _section(s, "FACTOR 4 — HEALTHCARE COSTS")
+
+    tf = _mixed_box(s, Inches(0.45), Inches(0.55), Inches(12.3), Inches(1.1))
+    _para(tf, [("America’s bill is high because its ", C_DARK),
+               ("prices", C_RED),
+               (" are — not because it uses more care", C_DARK)],
+          size=27, bold=True)
+
+    _pic(s, _to_img(_chart_costs()),
+         Inches(0.3), Inches(1.6), Inches(8.75), Inches(5.65))
+
+    rx, rw = Inches(9.2), Inches(3.95)
+
+    tf2 = _mixed_box(s, rx, Inches(2.0), rw, Inches(0.8))
+    _para(tf2, [("The U.S. spends ~$12,600 per person", C_RED),
+                (" — about ", C_BODY),
+                ("2.2× Japan.", C_TEAL)],
+          size=13.5, bold=True)
+
+    tf3 = _mixed_box(s, rx, Inches(3.0), rw, Inches(2.4))
+    _para(tf3,
+          [("It isn’t that Americans see doctors more. "
+            "It’s unit price: U.S. medical prices run about ", C_BODY),
+           ("43% above the OECD average", C_RED),
+           (" (price level 143 vs. 100), led by drugs and administration.", C_BODY)],
+          size=12, bold=False)
+    _para(tf3, [("", C_BODY)], size=7, bold=False)
+    _para(tf3,
+          [("Same care, higher price tag — dollars that "
+            "never reach longer life.", C_DARK)],
+          size=12, bold=True)
+
+    _footer(s,
+            "Source: World Bank WDI (spend per person, PPP, 2022). "
+            "Price level: OECD, Society at a Glance 2024 / "
+            "Health at a Glance (OECD avg = 100).")
+
+
+# ── Slide 7 — THE PATTERN ─────────────────────────────────────────────────────
+
+def slide_pattern(prs):
+    s = _blank(prs)
+    _bg(s, C_WHITE)
+    _section(s, "THE PATTERN")
+
+    tf = _mixed_box(s, Inches(0.45), Inches(0.52), Inches(12.3), Inches(1.0))
+    _para(tf, [("One country, ", C_DARK),
+               ("four red flags", C_RED),
+               (" — and a budget that can’t fix them", C_DARK)],
+          size=27, bold=True)
+
+    # ── Column headers ──
+    _txt(s, "UNITED STATES", Inches(5.35), Inches(1.72), Inches(3.2), Inches(0.38),
+         size=10.5, bold=True, color=C_RED, align=PP_ALIGN.CENTER)
+    _txt(s, "JAPAN", Inches(9.55), Inches(1.72), Inches(2.6), Inches(0.38),
+         size=10.5, bold=True, color=C_TEAL, align=PP_ALIGN.CENTER)
+    _rect(s, Inches(0.45), Inches(2.16), Inches(12.4), Inches(0.022), "#E5E7EB")
 
     rows = [
-        ("Adult obesity rate",          "36.2%",    "4–24%",          "US +12–32 pp"),
-        ("Preventable mortality /100K",  "247",       "110–130",        "US −50%"),
-        ("Primary care visits / capita", "3.9 / yr", "12–13 / yr",     "US 3× lower"),
-        ("Prevention % of health spend", "2.9%",     "5–7%",           "US −2 to −4 pp"),
-        ("Life expectancy",              "78.5 yrs", "83–84 yrs",      "US −5 yrs"),
+        ("Avg. life expectancy",   "78 yrs",  C_DARK,  "83 yrs",  C_TEAL),
+        ("Health spend / person",  "$12,600", C_RED,   "$5,300",  C_DARK),
+        ("Education — PISA 2022", "489",  C_DARK,  "533",     C_TEAL),
+        ("Adult obesity",          "42.9%",   C_RED,   "4.9%",    C_DARK),
+        ("Population aged 65+",    "17.9%",   C_DARK,  "29.8%",   C_DARK),
+        ("Medical price level",    "143",     C_RED,   "≈100", C_DARK),
     ]
+    rh = Inches(0.66)
+    for i, (metric, us_v, us_c, jp_v, jp_c) in enumerate(rows):
+        top = Inches(2.18) + rh * i
+        if i % 2 == 0:
+            _rect(s, Inches(0.4), top, Inches(12.5), rh, "#F9FAFB")
+        _txt(s, metric,
+             Inches(0.55), top + Inches(0.16), Inches(4.4), Inches(0.38),
+             size=12.5, color="#374151")
+        _txt(s, us_v,
+             Inches(5.35), top + Inches(0.1), Inches(3.2), Inches(0.48),
+             size=21, bold=True, color=us_c, align=PP_ALIGN.CENTER)
+        _txt(s, jp_v,
+             Inches(9.55), top + Inches(0.1), Inches(2.6), Inches(0.48),
+             size=21, bold=True, color=jp_c, align=PP_ALIGN.CENTER)
 
-    for i, row_data in enumerate(rows):
-        bg = C_LIGHTGRAY if i % 2 == 0 else C_WHITE
-        for j, (val, cw, cl) in enumerate(zip(row_data, col_w, col_left)):
-            _rect(slide, cl, top0 + row_h * (i + 1), cw, row_h, bg)
-            fc = (C_ORANGE if j == 1 else
-                  (MPL_GREEN if j == 2 else C_NEARBLACK))
-            _txt(slide, val,
-                 cl + Inches(0.06),
-                 top0 + row_h * (i + 1) + Inches(0.08),
-                 cw - Inches(0.1), row_h - Inches(0.1),
-                 size=10.5, color=fc,
-                 bold=(j == 1))
+    _rect(s, Inches(0.45), Inches(6.60), Inches(12.4), Inches(0.022), "#E5E7EB")
+    _txt(s,
+         "The U.S. leads only where leading hurts — spending and prices — "
+         "and trails on the upstream factors that actually make lives longer.",
+         Inches(0.55), Inches(6.68), Inches(12.2), Inches(0.52),
+         size=12, bold=True, color=C_DARK)
 
-    # Summary banner
-    _rect(slide, Inches(0.4), Inches(5.58), Inches(12.5), Inches(0.95), C_DARKBLUE)
-    _txt(slide,
-         "The gap is not in hospital equipment — it's in what happens before people need a hospital.",
-         Inches(0.55), Inches(5.7), Inches(12.2), Inches(0.75),
-         size=14, bold=True, color=C_WHITE, align=PP_ALIGN.CENTER)
-
-    _txt(slide,
-         "Source: OECD Health at a Glance 2023, WHO Global Health Observatory, World Bank WDI.",
-         Inches(0.4), Inches(7.2), Inches(12.5), Inches(0.26),
-         size=8, italic=True, color=C_GRAY)
+    _footer(s,
+            "Sources: World Bank WDI; OECD PISA 2022; WHO GHO 2022; "
+            "UN/World Bank 2024; OECD price levels. Figures rounded.")
 
 
-# ── Slide 10 – Call to Action ─────────────────────────────────────────────────
+# ── Slide 8 — THE TAKEAWAY ────────────────────────────────────────────────────
 
-def slide_cta(prs):
-    slide = _blank_slide(prs)
-    _bg(slide, C_DARKBLUE)
+def slide_takeaway(prs):
+    s = _blank(prs)
+    _bg(s, C_NAVY)
 
-    _rect(slide, Inches(0), Inches(0), Inches(0.35), SLIDE_H, C_BLUE)
+    _txt(s, "THE TAKEAWAY",
+         Inches(0.45), Inches(0.32), Inches(4.0), Inches(0.32),
+         size=9, bold=True, color=C_SUB)
 
-    _txt(slide,
-         "The question is no longer how much to spend.",
-         Inches(0.7), Inches(0.45), Inches(12.0), Inches(0.62),
-         size=28, bold=True, color=C_WHITE)
-
-    _txt(slide,
-         "It's what the highest-spending countries are doing differently — and what they should stop doing.",
-         Inches(0.7), Inches(1.1), Inches(11.5), Inches(0.55),
-         size=15, color=C_LIGHTBLUE)
+    tf = _mixed_box(s, Inches(0.45), Inches(0.82), Inches(12.3), Inches(2.15))
+    _para(tf, [("Stop asking ", C_WHITE),
+               ("how much", C_MUTED),
+               (" to spend.", C_WHITE)],
+          size=44, bold=True, space_after=0)
+    _para(tf, [("Fix what the money ", C_WHITE),
+               ("sits on.", C_TEAL)],
+          size=44, bold=True)
 
     recs = [
-        ("Redirect spend upstream",
-         "Raise prevention and primary care from 2.9% to 6%+ of health spend. "
-         "Every $1 in prevention saves $5–14 in downstream treatment costs."),
-        ("Address obesity structurally",
-         "Implement population-level interventions: sugar taxes, food labelling reform, "
-         "school nutrition programmes. These are public health investments, not individual choices."),
-        ("Redesign system incentives",
-         "Shift from fee-for-service to outcomes-based payment models. "
-         "Reward providers for keeping populations healthy, not for volume of procedures."),
+        ("Measure outcomes per dollar, not dollars.",
+         "Benchmark health systems on life expectancy gained per dollar — "
+         "the metric on which the U.S. ranks last among peers."),
+        ("Move marginal dollars upstream.",
+         "Shift spending toward obesity prevention and education equity — "
+         "the levers where Japan and Spain win on far smaller budgets."),
+        ("Attack price, not just volume.",
+         "Target the ~43% price premium — drug costs and administration — "
+         "before adding another dollar of treatment spend."),
     ]
 
     for i, (title, body) in enumerate(recs):
-        top = Inches(1.9 + i * 1.6)
-        _rect(slide, Inches(0.7), top, Inches(0.5), Inches(0.5), C_BLUE)
-        _txt(slide, str(i + 1),
-             Inches(0.7), top, Inches(0.5), Inches(0.5),
-             size=17, bold=True, color=C_WHITE, align=PP_ALIGN.CENTER)
-        _txt(slide, title,
-             Inches(1.35), top, Inches(11.6), Inches(0.5),
-             size=15, bold=True, color=C_WHITE)
-        _txt(slide, body,
-             Inches(1.35), top + Inches(0.52), Inches(11.6), Inches(0.95),
-             size=11, color=C_BLUEGRAY)
+        top = Inches(3.2) + Inches(1.3) * i
+        circ = _oval(s, Inches(0.45), top + Inches(0.0), Inches(0.46), Inches(0.46), C_RED)
+        # Number inside circle — use shape text frame
+        circ.text_frame.text = str(i + 1)
+        circ.text_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
+        run = circ.text_frame.paragraphs[0].runs[0]
+        run.font.size = Pt(14)
+        run.font.bold = True
+        run.font.color.rgb = _rgb(C_WHITE)
+        from pptx.enum.text import MSO_ANCHOR
+        circ.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
 
-    # Closing rule + big idea restatement
-    _rect(slide, Inches(0.7), Inches(6.82), Inches(11.8), Inches(0.04), C_BLUE)
-    _txt(slide,
-         "America's longevity problem is not a budget problem — it is upstream of the budget.",
-         Inches(0.7), Inches(6.95), Inches(11.8), Inches(0.42),
-         size=12, bold=True, color=C_LIGHTBLUE, align=PP_ALIGN.CENTER)
+        _txt(s, title,
+             Inches(1.1), top, Inches(11.8), Inches(0.44),
+             size=15, bold=True, color=C_WHITE)
+        _txt(s, body,
+             Inches(1.1), top + Inches(0.46), Inches(11.8), Inches(0.76),
+             size=11.5, color=C_SUB)
+
+    _footer(s,
+            "Built on the attached Power BI analysis (World Bank WDI) "
+            "· added factors: OECD, WHO, World Bank.")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    data_path = os.path.join(base_dir, "data", "health_data.csv")
-    out_path  = os.path.join(base_dir, "health_expenditure_analysis.pptx")
-
-    print("Loading data …")
-    df = pd.read_csv(data_path)
+    base = os.path.dirname(os.path.abspath(__file__))
+    df   = pd.read_csv(os.path.join(base, "data", "health_data.csv"))
+    out  = os.path.join(base, "health_expenditure_analysis.pptx")
 
     prs = Presentation()
-    prs.slide_width  = SLIDE_W
-    prs.slide_height = SLIDE_H
+    prs.slide_width  = W
+    prs.slide_height = H
 
     steps = [
-        ("Slide 1  – Cover",                  lambda: slide_cover(prs)),
-        ("Slide 2  – Global scatter",          lambda: slide_global_scatter(prs, df)),
-        ("Slide 3  – Top spenders",            lambda: slide_top_spenders(prs, df)),
-        ("Slide 4  – US anomaly",              lambda: slide_us_anomaly(prs, df)),
-        ("Slide 5  – Upstream factors",        lambda: slide_upstream_factors(prs)),
-        ("Slide 6  – Obesity",                 lambda: slide_obesity(prs, df)),
-        ("Slide 7  – Education",               lambda: slide_education(prs, df)),
-        ("Slide 8  – Efficiency",              lambda: slide_efficiency(prs, df)),
-        ("Slide 9  – Comparison table",        lambda: slide_comparison_table(prs)),
-        ("Slide 10 – Call to action",          lambda: slide_cta(prs)),
+        ("Cover",         lambda: slide_cover(prs)),
+        ("The Setup",     lambda: slide_setup(prs, df)),
+        ("Education",     lambda: slide_education(prs, df)),
+        ("Lifestyle",     lambda: slide_lifestyle(prs, df)),
+        ("Demographics",  lambda: slide_demographics(prs, df)),
+        ("Costs",         lambda: slide_costs(prs)),
+        ("Pattern",       lambda: slide_pattern(prs)),
+        ("Takeaway",      lambda: slide_takeaway(prs)),
     ]
 
     for label, fn in steps:
-        print(f"Building {label} …")
+        print(f"  {label} ...")
         fn()
 
-    prs.save(out_path)
-    print(f"\nSaved to: {out_path}")
+    prs.save(out)
+    print(f"Saved: {out}")
 
 
 if __name__ == "__main__":
